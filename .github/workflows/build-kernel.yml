@@ -110,6 +110,10 @@ jobs:
           CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
           CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
           CONFIG_KSU_SUSFS_SUS_MAP=y
+
+          # clang LTO needs the full LLVM binutils set; disable it for a
+          # reproducible build with binutils aarch64-linux-gnu-
+          # CONFIG_LTO_CLANG is not set
           EOF
           tail -15 arch/arm64/configs/grass-perf_defconfig
 
