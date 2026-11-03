@@ -15,6 +15,10 @@ on:
         description: "full = build + package, patch = patches only"
         default: "full"
         required: false
+      variant:
+        description: "bakasu = BakaSU+SuSFS, vanilla = plain community tree"
+        default: "bakasu"
+        required: false
   push:
     branches: [main]
 
@@ -30,6 +34,7 @@ jobs:
       KSU_REF: ${{ github.event.inputs.bakasu_ref || 'v4.2.0-rc3' }}
       KERNEL_COMMIT: ${{ github.event.inputs.kernel_commit || 'e26c9a738' }}
       MODE: ${{ github.event.inputs.mode || 'full' }}
+      VARIANT: ${{ github.event.inputs.variant || 'bakasu' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +69,7 @@ jobs:
           head -5 Makefile
 
       - name: Integrate BakaSU
+        if: env.VARIANT == 'bakasu'
         run: |
           set -euxo pipefail
           cd kernel
@@ -75,6 +81,7 @@ jobs:
           git -C KernelSU describe --tags --always || true
 
       - name: Apply SuSFS kernel patch
+        if: env.VARIANT == 'bakasu'
         run: |
           set -o pipefail
           cd kernel
@@ -85,6 +92,7 @@ jobs:
           grep -n "susfs_init\|susfs_is_inode_sus_path" fs/susfs.c | head -3
 
       - name: Apply SuSFS inline hooks
+        if: env.VARIANT == 'bakasu'
         run: |
           set -o pipefail
           cd kernel
@@ -95,27 +103,29 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
-          cat >> arch/arm64/configs/grass-perf_defconfig <<'EOF'
-
-          # BakaSU + SuSFS
-          CONFIG_KSU=y
-          CONFIG_KSU_SUSFS=y
-          CONFIG_THREAD_INFO_IN_TASK=y
-          CONFIG_KSU_SUSFS_SUS_PATH=y
-          CONFIG_KSU_SUSFS_SUS_MOUNT=y
-          CONFIG_KSU_SUSFS_SUS_KSTAT=y
-          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
-          CONFIG_KSU_SUSFS_ENABLE_LOG=y
-          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
-          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
-          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
-          CONFIG_KSU_SUSFS_SUS_MAP=y
-
+          DEF=arch/arm64/configs/grass-perf_defconfig
+          if [ "$VARIANT" = "bakasu" ]; then
+            {
+              echo ''
+              echo '# BakaSU + SuSFS'
+              echo 'CONFIG_KSU=y'
+              echo 'CONFIG_KSU_SUSFS=y'
+              echo 'CONFIG_THREAD_INFO_IN_TASK=y'
+              echo 'CONFIG_KSU_SUSFS_SUS_PATH=y'
+              echo 'CONFIG_KSU_SUSFS_SUS_MOUNT=y'
+              echo 'CONFIG_KSU_SUSFS_SUS_KSTAT=y'
+              echo 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y'
+              echo 'CONFIG_KSU_SUSFS_ENABLE_LOG=y'
+              echo 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y'
+              echo 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y'
+              echo 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y'
+              echo 'CONFIG_KSU_SUSFS_SUS_MAP=y'
+            } >> "$DEF"
+          fi
           # clang LTO needs the full LLVM binutils set; disable it for a
           # reproducible build with binutils aarch64-linux-gnu-
-          # CONFIG_LTO_CLANG is not set
-          EOF
-          tail -15 arch/arm64/configs/grass-perf_defconfig
+          echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
+          tail -15 "$DEF"
 
       - name: Build kernel
         if: env.MODE == 'full'
@@ -149,7 +159,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tb128fu-kernel-${{ github.run_number }}
+          name: tb128fu-kernel-${{ env.VARIANT }}-${{ github.run_number }}
           path: |
             artifacts/
             /tmp/build.log
