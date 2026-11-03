@@ -1,5 +1,9 @@
 name: Build TB128FU kernel (BakaSU + SuSFS)
 
+# 零费用说明：
+#   - 公开仓库的标准 runner 计算分钟免费
+#   - 不使用 actions/upload-artifact（artifact 存储会按 GB·月 计费）
+#   - 产物通过 GitHub Release 附件发布（Release 附件不计入 Actions 存储）
 on:
   workflow_dispatch:
     inputs:
@@ -12,18 +16,22 @@ on:
         default: "e26c9a738"
         required: false
       mode:
-        description: "full = build + package, patch = patches only"
+        description: "full = 编译, patch = 只打补丁自检"
         default: "full"
         required: false
       variant:
-        description: "bakasu = BakaSU+SuSFS, vanilla = plain community tree"
+        description: "bakasu = BakaSU+SuSFS, vanilla = 纯净社区树"
         default: "bakasu"
         required: false
   push:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -35,6 +43,7 @@ jobs:
       KERNEL_COMMIT: ${{ github.event.inputs.kernel_commit || 'e26c9a738' }}
       MODE: ${{ github.event.inputs.mode || 'full' }}
       VARIANT: ${{ github.event.inputs.variant || 'bakasu' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +52,7 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache curl flex git \
+            bc bison build-essential curl flex git \
             gnupg gperf libelf-dev libssl-dev libxml2 libxml2-utils lzop \
             python3 rsync unzip zip zlib1g-dev device-tree-compiler \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld cpio kmod
@@ -75,7 +84,6 @@ jobs:
           cd kernel
           curl -fL --retry 3 -o /tmp/bakasu-setup.sh https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh
           bash /tmp/bakasu-setup.sh "$KSU_REF" 2>&1 | tee /tmp/bakasu-setup.log
-          echo "--- drivers/kernelsu ---"
           ls -la drivers/kernelsu | head -20
           git -C KernelSU log --oneline -1 || true
           git -C KernelSU describe --tags --always || true
@@ -86,7 +94,6 @@ jobs:
           set -o pipefail
           cd kernel
           patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log
-          echo "== rej files =="
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
           grep -n "susfs_init\|susfs_is_inode_sus_path" fs/susfs.c | head -3
@@ -122,8 +129,7 @@ jobs:
               echo 'CONFIG_KSU_SUSFS_SUS_MAP=y'
             } >> "$DEF"
           fi
-          # clang LTO needs the full LLVM binutils set; disable it for a
-          # reproducible build with binutils aarch64-linux-gnu-
+          # clang LTO 需要完整 LLVM binutils，这里用 binutils 交叉工具链，关掉 LTO
           echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
           tail -15 "$DEF"
 
@@ -145,28 +151,48 @@ jobs:
         if: env.MODE == 'full'
         run: |
           set -euxo pipefail
-          mkdir -p artifacts
-          cp kernel/out/arch/arm64/boot/Image.gz artifacts/ || true
-          cp kernel/out/arch/arm64/boot/Image artifacts/ || true
-          cp kernel/out/arch/arm64/boot/dtb.img artifacts/ 2>/dev/null || true
-          cp kernel/out/arch/arm64/boot/dtbo.img artifacts/ 2>/dev/null || true
-          cp kernel/out/.config artifacts/config.txt
-          cp kernel/out/System.map artifacts/ 2>/dev/null || true
-          ls -la artifacts
-          sha256sum artifacts/* | tee artifacts/SHA256SUMS.txt
+          mkdir -p dist
+          cp kernel/out/arch/arm64/boot/Image.gz dist/Image.gz
+          cp kernel/out/.config dist/config.txt
+          cd dist && sha256sum Image.gz config.txt > SHA256SUMS.txt && ls -la
 
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tb128fu-kernel-${{ env.VARIANT }}-${{ github.run_number }}
-          path: |
-            artifacts/
-            /tmp/build.log
-            /tmp/defconfig.log
-            /tmp/susfs-patch.log
-            /tmp/susfs-hooks.log
-            /tmp/bakasu-setup.log
-            /tmp/rej.txt
-          if-no-files-found: warn
-          retention-days: 14
+      - name: Publish release (no Actions storage)
+        if: env.MODE == 'full'
+        run: |
+          set -euxo pipefail
+          TAG="build-${VARIANT}-${GITHUB_RUN_NUMBER}"
+          TITLE="TB128FU ${VARIANT} kernel #${GITHUB_RUN_NUMBER}"
+          {
+            echo "Kernel: $(cat kernel/out/include/config/kernel.release 2>/dev/null || echo unknown)"
+            echo "Variant: ${VARIANT}  |  BakaSU: ${KSU_REF}  |  Kernel commit: ${KERNEL_COMMIT}"
+            echo ""
+            echo '```'
+            cat /tmp/config-check.txt 2>/dev/null || true
+            echo '```'
+          } > /tmp/notes.md
+          gh release create "$TAG" dist/Image.gz dist/config.txt dist/SHA256SUMS.txt \
+            --title "$TITLE" --notes-file /tmp/notes.md --repo "$GITHUB_REPOSITORY"
+          echo "### 产物地址" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep only the latest 3 releases
+        if: env.MODE == 'full'
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          gh release list --limit 100 --repo "$GITHUB_REPOSITORY" --json tagName,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName' | while read -r tag; do
+              [ -n "$tag" ] || continue
+              echo "deleting old release: $tag"
+              gh release delete "$tag" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+            done
+
+      - name: Failure diagnostics
+        if: failure()
+        run: |
+          {
+            echo "### 构建失败"
+            echo '```'
+            tail -80 /tmp/build.log 2>/dev/null || tail -40 /tmp/susfs-patch.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
