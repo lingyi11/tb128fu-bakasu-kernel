@@ -1,0 +1,155 @@
+name: Build TB128FU kernel (BakaSU + SuSFS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      bakasu_ref:
+        description: "BakaSU tag/commit/branch"
+        default: "v4.2.0-rc3"
+        required: false
+      kernel_commit:
+        description: "kernel_lenovo_tb128fu commit"
+        default: "e26c9a738"
+        required: false
+      mode:
+        description: "full = build + package, patch = patches only"
+        default: "full"
+        required: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    env:
+      TC: ${{ github.workspace }}/tc
+      KSU_REF: ${{ github.event.inputs.bakasu_ref || 'v4.2.0-rc3' }}
+      KERNEL_COMMIT: ${{ github.event.inputs.kernel_commit || 'e26c9a738' }}
+      MODE: ${{ github.event.inputs.mode || 'full' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache curl flex g++-multilib gcc-multilib git \
+            gnupg gperf libelf-dev libssl-dev libxml2 libxml2-utils lzop \
+            python3 rsync unzip zip zlib1g-dev device-tree-compiler \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld cpio kmod
+
+      - name: Fetch AOSP clang r416183b
+        run: |
+          set -euxo pipefail
+          mkdir -p "$TC"
+          curl -fL --retry 3 --retry-delay 5 -o clang.tar.gz \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r416183b.tar.gz
+          tar -xzf clang.tar.gz -C "$TC"
+          "$TC/bin/clang" --version
+
+      - name: Clone kernel source
+        run: |
+          set -euxo pipefail
+          git clone --depth=1 https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git kernel
+          cd kernel
+          git fetch --depth=1 origin "$KERNEL_COMMIT"
+          git checkout --detach FETCH_HEAD
+          git log --oneline -1
+          head -5 Makefile
+
+      - name: Integrate BakaSU
+        run: |
+          set -euxo pipefail
+          cd kernel
+          curl -fL --retry 3 -o /tmp/bakasu-setup.sh https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh
+          bash /tmp/bakasu-setup.sh "$KSU_REF" 2>&1 | tee /tmp/bakasu-setup.log
+          echo "--- drivers/kernelsu ---"
+          ls -la drivers/kernelsu | head -20
+          git -C KernelSU log --oneline -1 || true
+          git -C KernelSU describe --tags --always || true
+
+      - name: Apply SuSFS kernel patch
+        run: |
+          set -o pipefail
+          cd kernel
+          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_patch_to_4.19.patch" 2>&1 | tee /tmp/susfs-patch.log
+          echo "== rej files =="
+          find . -name '*.rej' -print | tee /tmp/rej.txt
+          test ! -s /tmp/rej.txt
+
+      - name: Apply SuSFS inline hooks
+        run: |
+          set -o pipefail
+          cd kernel
+          bash "$GITHUB_WORKSPACE/patches/susfs_inline_hook_patches.sh" 2>&1 | tee /tmp/susfs-hooks.log
+          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c fs/namei.c security/selinux/hooks.c || true
+
+      - name: Configure defconfig
+        run: |
+          set -euxo pipefail
+          cd kernel
+          cat >> arch/arm64/configs/grass-perf_defconfig <<'EOF'
+
+          # BakaSU + SuSFS
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_THREAD_INFO_IN_TASK=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=y
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
+          CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
+          CONFIG_KSU_SUSFS_SUS_MAP=y
+          EOF
+          tail -15 arch/arm64/configs/grass-perf_defconfig
+
+      - name: Build kernel
+        if: env.MODE == 'full'
+        run: |
+          set -euxo pipefail
+          cd kernel
+          make O=out ARCH=arm64 \
+            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            grass-perf_defconfig 2>&1 | tee /tmp/defconfig.log
+          grep -E '^CONFIG_(KSU|KSU_SUSFS|THREAD_INFO_IN_TASK|LTO|KPROBES)' out/.config | tee /tmp/config-check.txt
+          make O=out ARCH=arm64 \
+            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            -j"$(nproc)" Image.gz 2>&1 | tee /tmp/build.log
+
+      - name: Collect outputs
+        if: env.MODE == 'full'
+        run: |
+          set -euxo pipefail
+          mkdir -p artifacts
+          cp kernel/out/arch/arm64/boot/Image.gz artifacts/ || true
+          cp kernel/out/arch/arm64/boot/Image artifacts/ || true
+          cp kernel/out/arch/arm64/boot/dtb.img artifacts/ 2>/dev/null || true
+          cp kernel/out/arch/arm64/boot/dtbo.img artifacts/ 2>/dev/null || true
+          cp kernel/out/.config artifacts/config.txt
+          cp kernel/out/System.map artifacts/ 2>/dev/null || true
+          ls -la artifacts
+          sha256sum artifacts/* | tee artifacts/SHA256SUMS.txt
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb128fu-kernel-${{ github.run_number }}
+          path: |
+            artifacts/
+            /tmp/build.log
+            /tmp/defconfig.log
+            /tmp/susfs-patch.log
+            /tmp/susfs-hooks.log
+            /tmp/bakasu-setup.log
+            /tmp/rej.txt
+          if-no-files-found: warn
+          retention-days: 14
