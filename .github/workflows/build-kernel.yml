@@ -56,8 +56,10 @@ jobs:
           set -euxo pipefail
           git clone --depth=1 https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git kernel
           cd kernel
-          git fetch --depth=1 origin "$KERNEL_COMMIT"
-          git checkout --detach FETCH_HEAD
+          git rev-parse HEAD
+          if [ "$(git rev-parse HEAD)" != "$KERNEL_COMMIT" ]; then
+            echo "::warning::HEAD $(git rev-parse HEAD) != pinned $KERNEL_COMMIT"
+          fi
           git log --oneline -1
           head -5 Makefile
 
