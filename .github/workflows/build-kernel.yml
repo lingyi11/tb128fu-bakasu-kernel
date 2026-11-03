@@ -78,10 +78,11 @@ jobs:
         run: |
           set -o pipefail
           cd kernel
-          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_patch_to_4.19.patch" 2>&1 | tee /tmp/susfs-patch.log
+          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log
           echo "== rej files =="
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
+          grep -n "susfs_init\|susfs_is_inode_sus_path" fs/susfs.c | head -3
 
       - name: Apply SuSFS inline hooks
         run: |
