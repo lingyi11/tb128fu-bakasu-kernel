@@ -35,6 +35,10 @@ on:
         description: "defconfig name (under arch/arm64/configs)"
         default: "grass-perf_defconfig"
         required: false
+      lto:
+        description: "enable clang LTO (ld.lld), matches the reference build"
+        default: "true"
+        required: false
 
 permissions:
   contents: write
@@ -56,6 +60,7 @@ jobs:
       KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git' }}
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'grass-perf_defconfig' }}
+      LTO: ${{ github.event.inputs.lto || 'true' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -165,8 +170,10 @@ jobs:
               echo '# CONFIG_KSU_SUSFS is not set'
             } >> "$DEF"
           fi
-          # clang LTO 需要完整 LLVM binutils，这里用 binutils 交叉工具链，关掉 LTO
-          echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
+          # LTO: 与参考构建保持一致（需要 ld.lld + LLVM binutils）
+          if [ "$LTO" != "true" ]; then
+            echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
+          fi
           tail -15 "$DEF"
 
       - name: Build kernel
@@ -174,12 +181,18 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
+          if [ "$LTO" = "true" ]; then
+            export PATH="$TC/bin:$PATH"
+            MKARGS="LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip"
+          else
+            MKARGS=""
+          fi
           make O=out ARCH=arm64 \
-            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $MKARGS \
             "$DEFCONFIG" 2>&1 | tee /tmp/defconfig.log
           grep -E '^CONFIG_(KSU|KSU_SUSFS|THREAD_INFO_IN_TASK|LTO|KPROBES)' out/.config | tee /tmp/config-check.txt
           make O=out ARCH=arm64 \
-            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $MKARGS \
             KCFLAGS="-Wno-unknown-attributes" \
             -j"$(nproc)" Image.gz 2>&1 | tee /tmp/build.log
 
