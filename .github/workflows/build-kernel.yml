@@ -209,12 +209,12 @@ jobs:
         if: env.MODE == 'full'
         run: |
           set -euxo pipefail
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git ak3
-          rm -rf ak3/.git
-          cp "$GITHUB_WORKSPACE/ak3/anykernel.sh" ak3/anykernel.sh
-          cp dist/Image.gz ak3/Image.gz
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git ak3work
+          rm -rf ak3work/.git
+          cp "$GITHUB_WORKSPACE/ak3/anykernel.sh" ak3work/anykernel.sh
+          cp dist/Image.gz ak3work/Image.gz
           ZIP="TB128FU-${VARIANT}-${GITHUB_RUN_NUMBER}-AnyKernel3.zip"
-          ( cd ak3 && zip -r9 "../dist/${ZIP}" . -x '*.git*' >/dev/null )
+          ( cd ak3work && zip -r9 "../dist/${ZIP}" . -x '*.git*' >/dev/null )
           cd dist && sha256sum "${ZIP}" >> SHA256SUMS.txt && ls -la
 
       - name: Publish release (no Actions storage)
