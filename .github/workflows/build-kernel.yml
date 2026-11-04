@@ -100,9 +100,21 @@ jobs:
             echo "using official source asset ${SOURCE_TAG}/${SOURCE_ASSET}"
             mkdir -p /tmp/src
             gh release download "$SOURCE_TAG" -p "$SOURCE_ASSET" -O /tmp/ksrc.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
-            tar -xzf /tmp/ksrc.tar.gz -C /tmp/src
+            tar -xzf /tmp/ksrc.tar.gz -C /tmp/src kernel-4.19.157
             mv /tmp/src/kernel-4.19.157 kernel
             mkdir -p kernel/arch/arm64/boot/dts/vendor
+            # restore files whose names collide on case-insensitive filesystems
+            mkdir -p /tmp/casefix
+            gh release download "$SOURCE_TAG" -p casefix.tar.gz -O /tmp/casefix.tgz --repo "$GITHUB_REPOSITORY" --clobber
+            tar -xzf /tmp/casefix.tgz -C /tmp/casefix
+            while IFS="$(printf '\t')" read -r src dst; do
+              [ -n "$src" ] || continue
+              if [ -s "/tmp/casefix/$src" ]; then
+                mkdir -p "kernel/$(dirname "$dst")"
+                cp "/tmp/casefix/$src" "kernel/$dst"
+              fi
+            done < /tmp/casefix/map.txt
+            echo "casefix applied"
           else
             git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
           fi
