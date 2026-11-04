@@ -198,6 +198,8 @@ jobs:
               echo '# CONFIG_KSU_SUSFS is not set'
             } >> "$DEF"
           fi
+          # 内建 KSU 不需要外部模块版本校验；开着会让 __crc_* 触发 ABS32 重定位链接错误
+          echo '# CONFIG_MODVERSIONS is not set' >> "$DEF"
           # LTO: 与参考构建保持一致（需要 ld.lld + LLVM binutils）
           if [ "$LTO" != "true" ]; then
             echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
