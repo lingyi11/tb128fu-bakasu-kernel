@@ -39,6 +39,14 @@ on:
         description: "enable clang LTO (ld.lld), matches the reference build"
         default: "true"
         required: false
+      source_tag:
+        description: "release tag holding an official kernel source tarball (empty = git clone)"
+        default: ""
+        required: false
+      source_asset:
+        description: "source tarball asset name"
+        default: "kernel_src_4.19.157.tar.gz"
+        required: false
 
 permissions:
   contents: write
@@ -61,6 +69,8 @@ jobs:
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'grass-perf_defconfig' }}
       LTO: ${{ github.event.inputs.lto || 'true' }}
+      SOURCE_TAG: ${{ github.event.inputs.source_tag || '' }}
+      SOURCE_ASSET: ${{ github.event.inputs.source_asset || 'kernel_src_4.19.157.tar.gz' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -86,13 +96,19 @@ jobs:
       - name: Clone kernel source
         run: |
           set -euxo pipefail
-          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
-          cd kernel
-          git rev-parse HEAD
-          if [ "$(git rev-parse HEAD)" != "$KERNEL_COMMIT" ]; then
-            echo "::notice::HEAD $(git rev-parse HEAD) (pinned default $KERNEL_COMMIT)"
+          if [ -n "${SOURCE_TAG:-}" ]; then
+            echo "using official source asset ${SOURCE_TAG}/${SOURCE_ASSET}"
+            mkdir -p /tmp/src
+            gh release download "$SOURCE_TAG" -p "$SOURCE_ASSET" -O /tmp/ksrc.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+            tar -xzf /tmp/ksrc.tar.gz -C /tmp/src
+            mv /tmp/src/kernel-4.19.157 kernel
+            mkdir -p kernel/arch/arm64/boot/dts/vendor
+          else
+            git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
           fi
-          git log --oneline -1
+          cd kernel
+          git rev-parse HEAD 2>/dev/null || echo "no git metadata (source tarball)"
+          git log --oneline -1 2>/dev/null || true
           head -5 Makefile
           ls arch/arm64/configs/ | head -20
 
