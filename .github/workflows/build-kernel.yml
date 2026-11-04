@@ -23,6 +23,18 @@ on:
         description: "bakasu = BakaSU+SuSFS, bakasu-nosusfs = BakaSU 手动 hook 无 SuSFS, vanilla = 纯净社区树"
         default: "bakasu"
         required: false
+      kernel_repo:
+        description: "kernel source repo url"
+        default: "https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git"
+        required: false
+      kernel_branch:
+        description: "kernel source branch"
+        default: "master"
+        required: false
+      defconfig:
+        description: "defconfig name (under arch/arm64/configs)"
+        default: "grass-perf_defconfig"
+        required: false
 
 permissions:
   contents: write
@@ -41,6 +53,9 @@ jobs:
       KERNEL_COMMIT: ${{ github.event.inputs.kernel_commit || 'e26c9a738' }}
       MODE: ${{ github.event.inputs.mode || 'full' }}
       VARIANT: ${{ github.event.inputs.variant || 'bakasu' }}
+      KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git' }}
+      KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
+      DEFCONFIG: ${{ github.event.inputs.defconfig || 'grass-perf_defconfig' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -66,14 +81,15 @@ jobs:
       - name: Clone kernel source
         run: |
           set -euxo pipefail
-          git clone --depth=1 https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git kernel
+          git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
           cd kernel
           git rev-parse HEAD
           if [ "$(git rev-parse HEAD)" != "$KERNEL_COMMIT" ]; then
-            echo "::warning::HEAD $(git rev-parse HEAD) != pinned $KERNEL_COMMIT"
+            echo "::notice::HEAD $(git rev-parse HEAD) (pinned default $KERNEL_COMMIT)"
           fi
           git log --oneline -1
           head -5 Makefile
+          ls arch/arm64/configs/ | head -20
 
       - name: Integrate BakaSU
         if: startsWith(env.VARIANT, 'bakasu')
@@ -118,7 +134,7 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
-          DEF=arch/arm64/configs/grass-perf_defconfig
+          DEF=arch/arm64/configs/$DEFCONFIG
           if [ "$VARIANT" = "bakasu" ]; then
             {
               echo ''
@@ -160,7 +176,7 @@ jobs:
           cd kernel
           make O=out ARCH=arm64 \
             CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
-            grass-perf_defconfig 2>&1 | tee /tmp/defconfig.log
+            "$DEFCONFIG" 2>&1 | tee /tmp/defconfig.log
           grep -E '^CONFIG_(KSU|KSU_SUSFS|THREAD_INFO_IN_TASK|LTO|KPROBES)' out/.config | tee /tmp/config-check.txt
           make O=out ARCH=arm64 \
             CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- \
@@ -176,6 +192,18 @@ jobs:
           cp kernel/out/.config dist/config.txt
           cd dist && sha256sum Image.gz config.txt > SHA256SUMS.txt && ls -la
 
+      - name: Package AnyKernel3 zip
+        if: env.MODE == 'full'
+        run: |
+          set -euxo pipefail
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git ak3
+          rm -rf ak3/.git
+          cp "$GITHUB_WORKSPACE/ak3/anykernel.sh" ak3/anykernel.sh
+          cp dist/Image.gz ak3/Image.gz
+          ZIP="TB128FU-${VARIANT}-${GITHUB_RUN_NUMBER}-AnyKernel3.zip"
+          ( cd ak3 && zip -r9 "../dist/${ZIP}" . -x '*.git*' >/dev/null )
+          cd dist && sha256sum "${ZIP}" >> SHA256SUMS.txt && ls -la
+
       - name: Publish release (no Actions storage)
         if: env.MODE == 'full'
         run: |
@@ -186,11 +214,13 @@ jobs:
             echo "Kernel: $(cat kernel/out/include/config/kernel.release 2>/dev/null || echo unknown)"
             echo "Variant: ${VARIANT}  |  BakaSU: ${KSU_REF}  |  Kernel commit: ${KERNEL_COMMIT}"
             echo ""
+            echo "刷入方式：recovery 里刷 AnyKernel3 zip，或用 fastboot 刷手动重打包的 boot.img。"
+            echo ""
             echo '```'
             cat /tmp/config-check.txt 2>/dev/null || true
             echo '```'
           } > /tmp/notes.md
-          gh release create "$TAG" dist/Image.gz dist/config.txt dist/SHA256SUMS.txt \
+          gh release create "$TAG" dist/*.zip dist/Image.gz dist/config.txt dist/SHA256SUMS.txt \
             --title "$TITLE" --notes-file /tmp/notes.md --repo "$GITHUB_REPOSITORY"
           echo "### 产物地址" >> "$GITHUB_STEP_SUMMARY"
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
