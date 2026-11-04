@@ -20,11 +20,9 @@ on:
         default: "full"
         required: false
       variant:
-        description: "bakasu = BakaSU+SuSFS, vanilla = 纯净社区树"
+        description: "bakasu = BakaSU+SuSFS, bakasu-nosusfs = BakaSU 手动 hook 无 SuSFS, vanilla = 纯净社区树"
         default: "bakasu"
         required: false
-  push:
-    branches: [main]
 
 permissions:
   contents: write
@@ -78,7 +76,7 @@ jobs:
           head -5 Makefile
 
       - name: Integrate BakaSU
-        if: env.VARIANT == 'bakasu'
+        if: startsWith(env.VARIANT, 'bakasu')
         run: |
           set -euxo pipefail
           cd kernel
@@ -106,6 +104,16 @@ jobs:
           bash "$GITHUB_WORKSPACE/patches/susfs_inline_hook_patches.sh" 2>&1 | tee /tmp/susfs-hooks.log
           grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c fs/namei.c security/selinux/hooks.c || true
 
+      - name: Apply BakaSU manual hooks (no SuSFS)
+        if: env.VARIANT == 'bakasu-nosusfs'
+        run: |
+          set -o pipefail
+          cd kernel
+          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/ksu_manual_hooks_4.19_grass.patch" 2>&1 | tee /tmp/manual-hooks.log
+          find . -name '*.rej' -print | tee /tmp/rej.txt
+          test ! -s /tmp/rej.txt
+          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
+
       - name: Configure defconfig
         run: |
           set -euxo pipefail
@@ -127,6 +135,18 @@ jobs:
               echo 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y'
               echo 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y'
               echo 'CONFIG_KSU_SUSFS_SUS_MAP=y'
+            } >> "$DEF"
+          elif [ "$VARIANT" = "bakasu-nosusfs" ]; then
+            {
+              echo ''
+              echo '# BakaSU (manual hook, no SuSFS)'
+              echo 'CONFIG_KSU=y'
+              echo 'CONFIG_KSU_MANUAL_HOOK=y'
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y'
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y'
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y'
+              echo 'CONFIG_THREAD_INFO_IN_TASK=y'
+              echo '# CONFIG_KSU_SUSFS is not set'
             } >> "$DEF"
           fi
           # clang LTO 需要完整 LLVM binutils，这里用 binutils 交叉工具链，关掉 LTO

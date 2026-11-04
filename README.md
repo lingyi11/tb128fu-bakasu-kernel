@@ -26,7 +26,7 @@ Actions → *Build TB128FU kernel (BakaSU + SuSFS)* → Run workflow
 
 | 输入 | 说明 |
 |---|---|
-| `variant` | `bakasu`（默认，BakaSU+SuSFS）或 `vanilla`（纯净社区树，用于排查启动问题） |
+| `variant` | `bakasu`（BakaSU+SuSFS）、`bakasu-nosusfs`（BakaSU 手动 hook，无 SuSFS）、`vanilla`（纯净社区树，用于排查） |
 | `mode` | `full` 完整编译；`patch` 只打补丁自检 |
 | `bakasu_ref` | BakaSU tag/commit，默认 `v4.2.0-rc3` |
 | `kernel_commit` | 内核提交，默认 `e26c9a738` |
