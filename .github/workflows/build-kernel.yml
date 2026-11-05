@@ -185,6 +185,8 @@ jobs:
             echo '# CONFIG_MODVERSIONS is not set' >> "$DEF"
             echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
           fi
+          # 与官方内核的 release 字符串保持一致，否则 vendor 里的 .ko 会因 vermagic 不符而加载失败
+          echo 'CONFIG_LOCALVERSION="-perf+"' >> "$DEF"
           tail -12 "$DEF"
 
       - name: Build kernel
