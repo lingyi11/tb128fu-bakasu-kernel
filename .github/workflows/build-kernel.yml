@@ -52,6 +52,10 @@ on:
         description: "额外追加到配置文件的 CONFIG 行（空格分隔）"
         default: ""
         required: false
+      ext_modules:
+        description: "额外编译 techpack/wlan 外部模块（true/false）"
+        default: "false"
+        required: false
 
 permissions:
   contents: write
@@ -77,6 +81,7 @@ jobs:
       CONFIG_ASSET: ${{ github.event.inputs.config_asset || '' }}
       FORCE_MODULES: ${{ github.event.inputs.force_modules || 'false' }}
       EXTRA_DEFCONFIG: ${{ github.event.inputs.extra_defconfig || '' }}
+      EXT_MODULES: ${{ github.event.inputs.ext_modules || 'false' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -288,6 +293,13 @@ jobs:
           rm -rf modout
           make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
             INSTALL_MOD_PATH="$PWD/modout" modules_install 2>&1 | tee -a /tmp/modules.log
+          if [ "${EXT_MODULES:-false}" = "true" ] && [ -d techpack/wlan ]; then
+            echo "building external WLAN module"
+            make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
+              M=techpack/wlan WLAN_ROOT="$PWD/techpack/wlan" \
+              -j"$(nproc)" modules 2>&1 | tee /tmp/wlan-module.log || true
+            find techpack/wlan -name '*.ko' -print | tee /tmp/wlan-ko.txt || true
+          fi
 
       - name: Collect outputs
         if: env.MODE == 'full'
@@ -298,6 +310,11 @@ jobs:
           cp kernel/out/.config dist/config.txt
           KREL=$(cat kernel/out/include/config/kernel.release)
           tar -czf dist/modules.tar.gz -C "kernel/modout/lib/modules/$KREL" --exclude=build --exclude=source .
+          if [ -s /tmp/wlan-ko.txt ]; then
+            mkdir -p dist/wlan
+            while read -r ko; do cp "$ko" dist/wlan/; done < /tmp/wlan-ko.txt
+            tar -czf dist/wlan_modules.tar.gz -C dist/wlan .
+          fi
           cd dist && sha256sum Image.gz config.txt modules.tar.gz > SHA256SUMS.txt && ls -la
 
       - name: Package AnyKernel3 zip
@@ -326,7 +343,7 @@ jobs:
             cat /tmp/config-check.txt 2>/dev/null || true
             echo '```'
           } > /tmp/notes.md
-          gh release create "$TAG" dist/*.zip dist/Image.gz dist/config.txt dist/modules.tar.gz dist/SHA256SUMS.txt \
+          gh release create "$TAG" dist/*.zip dist/Image.gz dist/config.txt dist/*.tar.gz dist/SHA256SUMS.txt \
             --title "$TITLE" --notes-file /tmp/notes.md --repo "$GITHUB_REPOSITORY"
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
 
