@@ -224,6 +224,11 @@ jobs:
           make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
             KCFLAGS="-Wno-unknown-attributes" \
             -j"$(nproc)" Image.gz 2>&1 | tee /tmp/build.log
+          make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
+            -j"$(nproc)" modules 2>&1 | tee /tmp/modules.log
+          rm -rf modout
+          make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
+            INSTALL_MOD_PATH="$PWD/modout" modules_install 2>&1 | tee -a /tmp/modules.log
 
       - name: Collect outputs
         if: env.MODE == 'full'
@@ -232,7 +237,9 @@ jobs:
           mkdir -p dist
           cp kernel/out/arch/arm64/boot/Image.gz dist/Image.gz
           cp kernel/out/.config dist/config.txt
-          cd dist && sha256sum Image.gz config.txt > SHA256SUMS.txt && ls -la
+          KREL=$(cat kernel/out/include/config/kernel.release)
+          tar -czf dist/modules.tar.gz -C "kernel/modout/lib/modules/$KREL" --exclude=build --exclude=source .
+          cd dist && sha256sum Image.gz config.txt modules.tar.gz > SHA256SUMS.txt && ls -la
 
       - name: Package AnyKernel3 zip
         if: env.MODE == 'full'
@@ -260,7 +267,7 @@ jobs:
             cat /tmp/config-check.txt 2>/dev/null || true
             echo '```'
           } > /tmp/notes.md
-          gh release create "$TAG" dist/*.zip dist/Image.gz dist/config.txt dist/SHA256SUMS.txt \
+          gh release create "$TAG" dist/*.zip dist/Image.gz dist/config.txt dist/modules.tar.gz dist/SHA256SUMS.txt \
             --title "$TITLE" --notes-file /tmp/notes.md --repo "$GITHUB_REPOSITORY"
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
 
