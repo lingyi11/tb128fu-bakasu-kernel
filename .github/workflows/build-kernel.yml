@@ -63,6 +63,7 @@ jobs:
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'P89990GA1_defconfig' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
 
