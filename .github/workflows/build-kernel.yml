@@ -87,6 +87,7 @@ jobs:
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'P89990GA1_defconfig' }}
       CONFIG_ASSET: ${{ github.event.inputs.config_asset || '' }}
+      ASSET_TAG: src-4.19.157
       FORCE_MODULES: ${{ github.event.inputs.force_modules || 'false' }}
       EXTRA_DEFCONFIG: ${{ github.event.inputs.extra_defconfig || '' }}
       EXT_MODULES: ${{ github.event.inputs.ext_modules || 'false' }}
@@ -161,16 +162,6 @@ jobs:
                 cp "/tmp/casefix/$src" "kernel/$dst"
               fi
             done < /tmp/casefix/map.txt
-            if [ "$TC_MODE" = "lenovo" ] || [ "$TC_MODE" = "ndk10" ] || [ "$TC_MODE" = "clang10" ]; then
-              echo "downloading Lenovo toolchain asset"
-              mkdir -p /tmp/tc
-              gh release download "$SOURCE_TAG" -p lenovo_tc.tar.gz -O /tmp/tc.tgz --repo "$GITHUB_REPOSITORY" --clobber
-              tar -xzf /tmp/tc.tgz -C /tmp/tc
-              chmod -R +x /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin || true
-              chmod -R +x /tmp/tc/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin || true
-              ls -la /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin/clang-11
-              ls -la /tmp/tc/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-ld
-            fi
           else
             git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
             if [ -n "${KERNEL_SUBDIR:-}" ] && [ -d "kernel/$KERNEL_SUBDIR" ]; then
@@ -178,6 +169,15 @@ jobs:
               rm -rf kernel
               mv /tmp/ksub kernel
             fi
+          fi
+          if [ "$TC_MODE" = "lenovo" ] || [ "$TC_MODE" = "ndk10" ] || [ "$TC_MODE" = "clang10" ]; then
+            echo "downloading Lenovo toolchain asset"
+            mkdir -p /tmp/tc
+            gh release download "$ASSET_TAG" -p lenovo_tc.tar.gz -O /tmp/tc.tgz --repo "$GITHUB_REPOSITORY" --clobber
+            tar -xzf /tmp/tc.tgz -C /tmp/tc
+            chmod -R +x /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin || true
+            chmod -R +x /tmp/tc/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin || true
+            ls -la /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin/clang-11
           fi
           cd kernel
           head -5 Makefile
@@ -233,7 +233,7 @@ jobs:
           cd kernel
           if [ -n "${CONFIG_ASSET:-}" ]; then
             echo "using stock kernel config ${CONFIG_ASSET}"
-            gh release download "$SOURCE_TAG" -p "$CONFIG_ASSET" -O arch/arm64/configs/stock_defconfig --repo "$GITHUB_REPOSITORY" --clobber
+            gh release download "$ASSET_TAG" -p "$CONFIG_ASSET" -O arch/arm64/configs/stock_defconfig --repo "$GITHUB_REPOSITORY" --clobber
             DEFCONFIG=stock_defconfig
             echo "DEFCONFIG=stock_defconfig" >> "$GITHUB_ENV"
           fi
