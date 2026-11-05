@@ -1,51 +1,44 @@
 name: Build TB128FU kernel (BakaSU + SuSFS)
 
-# 零费用说明：
-#   - 公开仓库的标准 runner 计算分钟免费
-#   - 不使用 actions/upload-artifact（artifact 存储会按 GB·月 计费）
-#   - 产物通过 GitHub Release 附件发布（Release 附件不计入 Actions 存储）
+# 零费用：公开仓库标准 runner 免费；产物走 Release 附件（不计 Actions 存储）。
 on:
   workflow_dispatch:
     inputs:
-      bakasu_ref:
-        description: "BakaSU tag/commit/branch"
-        default: "v4.2.0-rc3"
-        required: false
-      kernel_commit:
-        description: "kernel_lenovo_tb128fu commit"
-        default: "e26c9a738"
+      variant:
+        description: "bakasu = BakaSU+SuSFS, bakasu-nosusfs = BakaSU 手动 hook 无 SuSFS, vanilla = 纯净树"
+        default: "bakasu-nosusfs"
         required: false
       mode:
         description: "full = 编译, patch = 只打补丁自检"
         default: "full"
         required: false
-      variant:
-        description: "bakasu = BakaSU+SuSFS, bakasu-nosusfs = BakaSU 手动 hook 无 SuSFS, vanilla = 纯净社区树"
-        default: "bakasu"
+      bakasu_ref:
+        description: "BakaSU tag/commit/branch"
+        default: "v4.2.0-rc3"
+        required: false
+      source_tag:
+        description: "存放官方源码包的 release tag（空 = git clone kernel_repo）"
+        default: "src-4.19.157"
+        required: false
+      source_asset:
+        description: "官方源码包 asset 名"
+        default: "kernel_src_4.19.157.tar.gz"
         required: false
       kernel_repo:
-        description: "kernel source repo url"
+        description: "kernel_repo（source_tag 为空时使用）"
         default: "https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git"
         required: false
       kernel_branch:
-        description: "kernel source branch"
+        description: "kernel_branch"
         default: "master"
         required: false
       defconfig:
-        description: "defconfig name (under arch/arm64/configs)"
-        default: "grass-perf_defconfig"
+        description: "defconfig（arch/arm64/configs 下）"
+        default: "P89990GA1_defconfig"
         required: false
-      lto:
-        description: "enable clang LTO (ld.lld), matches the reference build"
-        default: "true"
-        required: false
-      source_tag:
-        description: "release tag holding an official kernel source tarball (empty = git clone)"
-        default: ""
-        required: false
-      source_asset:
-        description: "source tarball asset name"
-        default: "kernel_src_4.19.157.tar.gz"
+      tc_mode:
+        description: "aosp = AOSP clang 12 + LLD；lenovo = 源码包自带 clang-r383902b1 + gcc4.9 binutils"
+        default: "lenovo"
         required: false
 
 permissions:
@@ -60,50 +53,48 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 240
     env:
-      TC: ${{ github.workspace }}/tc
+      AOSP_TC: ${{ github.workspace }}/tc
       KSU_REF: ${{ github.event.inputs.bakasu_ref || 'v4.2.0-rc3' }}
-      KERNEL_COMMIT: ${{ github.event.inputs.kernel_commit || 'e26c9a738' }}
       MODE: ${{ github.event.inputs.mode || 'full' }}
-      VARIANT: ${{ github.event.inputs.variant || 'bakasu' }}
-      KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git' }}
-      KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
-      DEFCONFIG: ${{ github.event.inputs.defconfig || 'grass-perf_defconfig' }}
-      LTO: ${{ github.event.inputs.lto || 'true' }}
+      VARIANT: ${{ github.event.inputs.variant || 'bakasu-nosusfs' }}
       SOURCE_TAG: ${{ github.event.inputs.source_tag || '' }}
       SOURCE_ASSET: ${{ github.event.inputs.source_asset || 'kernel_src_4.19.157.tar.gz' }}
-      GH_TOKEN: ${{ github.token }}
+      KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git' }}
+      KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
+      DEFCONFIG: ${{ github.event.inputs.defconfig || 'P89990GA1_defconfig' }}
+      TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install host dependencies
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             bc bison build-essential curl flex git \
             gnupg gperf libelf-dev libssl-dev libxml2 libxml2-utils lzop \
-            python3 rsync unzip zip zlib1g-dev device-tree-compiler \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu lld cpio kmod
+            python3 rsync unzip zip zlib1g-dev device-tree-compiler cpio kmod
 
-      - name: Fetch AOSP clang r416183b
+      - name: Fetch AOSP clang (aosp mode only)
+        if: env.TC_MODE == 'aosp'
         run: |
           set -euxo pipefail
-          rm -rf "$TC"
+          rm -rf "$AOSP_TC"
           git clone --depth=1 -b lineage-20.0 \
-            https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$TC"
-          "$TC/bin/clang" --version
+            https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$AOSP_TC"
+          "$AOSP_TC/bin/clang" --version
 
-      - name: Clone kernel source
+      - name: Prepare kernel source
         run: |
           set -euxo pipefail
+          mkdir -p /tmp/src
           if [ -n "${SOURCE_TAG:-}" ]; then
             echo "using official source asset ${SOURCE_TAG}/${SOURCE_ASSET}"
-            mkdir -p /tmp/src
             gh release download "$SOURCE_TAG" -p "$SOURCE_ASSET" -O /tmp/ksrc.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
             tar -xzf /tmp/ksrc.tar.gz -C /tmp/src kernel-4.19.157
             mv /tmp/src/kernel-4.19.157 kernel
             mkdir -p kernel/arch/arm64/boot/dts/vendor
-            # restore files whose names collide on case-insensitive filesystems
+            # 恢复大小写冲突文件
             mkdir -p /tmp/casefix
             gh release download "$SOURCE_TAG" -p casefix.tar.gz -O /tmp/casefix.tgz --repo "$GITHUB_REPOSITORY" --clobber
             tar -xzf /tmp/casefix.tgz -C /tmp/casefix
@@ -114,13 +105,18 @@ jobs:
                 cp "/tmp/casefix/$src" "kernel/$dst"
               fi
             done < /tmp/casefix/map.txt
-            echo "casefix applied"
+            if [ "$TC_MODE" = "lenovo" ]; then
+              echo "downloading Lenovo toolchain asset"
+              mkdir -p /tmp/tc
+              gh release download "$SOURCE_TAG" -p lenovo_tc.tar.gz -O /tmp/tc.tgz --repo "$GITHUB_REPOSITORY" --clobber
+              tar -xzf /tmp/tc.tgz -C /tmp/tc
+              ls -la /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin/clang-11
+              ls -la /tmp/tc/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-ld
+            fi
           else
             git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
           fi
           cd kernel
-          git rev-parse HEAD 2>/dev/null || echo "no git metadata (source tarball)"
-          git log --oneline -1 2>/dev/null || true
           head -5 Makefile
           ls arch/arm64/configs/ | head -20
 
@@ -132,7 +128,6 @@ jobs:
           curl -fL --retry 3 -o /tmp/bakasu-setup.sh https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh
           bash /tmp/bakasu-setup.sh "$KSU_REF" 2>&1 | tee /tmp/bakasu-setup.log
           ls -la drivers/kernelsu | head -20
-          git -C KernelSU log --oneline -1 || true
           git -C KernelSU describe --tags --always || true
 
       - name: Apply SuSFS kernel patch
@@ -143,7 +138,6 @@ jobs:
           patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
-          grep -n "susfs_init\|susfs_is_inode_sus_path" fs/susfs.c | head -3
 
       - name: Apply SuSFS inline hooks
         if: env.VARIANT == 'bakasu'
@@ -151,7 +145,6 @@ jobs:
           set -o pipefail
           cd kernel
           bash "$GITHUB_WORKSPACE/patches/susfs_inline_hook_patches.sh" 2>&1 | tee /tmp/susfs-hooks.log
-          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c fs/namei.c security/selinux/hooks.c || true
 
       - name: Apply BakaSU manual hooks (no SuSFS)
         if: env.VARIANT == 'bakasu-nosusfs'
@@ -169,60 +162,50 @@ jobs:
           cd kernel
           DEF=arch/arm64/configs/$DEFCONFIG
           if [ "$VARIANT" = "bakasu" ]; then
-            {
-              echo ''
-              echo '# BakaSU + SuSFS'
-              echo 'CONFIG_KSU=y'
-              echo 'CONFIG_KSU_SUSFS=y'
-              echo 'CONFIG_THREAD_INFO_IN_TASK=y'
-              echo 'CONFIG_KSU_SUSFS_SUS_PATH=y'
-              echo 'CONFIG_KSU_SUSFS_SUS_MOUNT=y'
-              echo 'CONFIG_KSU_SUSFS_SUS_KSTAT=y'
-              echo 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y'
-              echo 'CONFIG_KSU_SUSFS_ENABLE_LOG=y'
-              echo 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y'
-              echo 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y'
-              echo 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y'
-              echo 'CONFIG_KSU_SUSFS_SUS_MAP=y'
-            } >> "$DEF"
+            { echo ''; echo '# BakaSU + SuSFS';
+              echo 'CONFIG_KSU=y'; echo 'CONFIG_KSU_SUSFS=y'; echo 'CONFIG_THREAD_INFO_IN_TASK=y';
+              echo 'CONFIG_KSU_SUSFS_SUS_PATH=y'; echo 'CONFIG_KSU_SUSFS_SUS_MOUNT=y';
+              echo 'CONFIG_KSU_SUSFS_SUS_KSTAT=y'; echo 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y';
+              echo 'CONFIG_KSU_SUSFS_ENABLE_LOG=y'; echo 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y';
+              echo 'CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y'; echo 'CONFIG_KSU_SUSFS_OPEN_REDIRECT=y';
+              echo 'CONFIG_KSU_SUSFS_SUS_MAP=y'; } >> "$DEF"
           elif [ "$VARIANT" = "bakasu-nosusfs" ]; then
-            {
-              echo ''
-              echo '# BakaSU (manual hook, no SuSFS)'
-              echo 'CONFIG_KSU=y'
-              echo 'CONFIG_KSU_MANUAL_HOOK=y'
-              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y'
-              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y'
-              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y'
-              echo 'CONFIG_THREAD_INFO_IN_TASK=y'
-              echo '# CONFIG_KSU_SUSFS is not set'
-            } >> "$DEF"
+            { echo ''; echo '# BakaSU (manual hook, no SuSFS)';
+              echo 'CONFIG_KSU=y'; echo 'CONFIG_KSU_MANUAL_HOOK=y';
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y';
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y';
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y';
+              echo 'CONFIG_THREAD_INFO_IN_TASK=y';
+              echo '# CONFIG_KSU_SUSFS is not set'; } >> "$DEF"
           fi
-          # 内建 KSU 不需要外部模块版本校验；开着会让 __crc_* 触发 ABS32 重定位链接错误
-          echo '# CONFIG_MODVERSIONS is not set' >> "$DEF"
-          # LTO: 与参考构建保持一致（需要 ld.lld + LLVM binutils）
-          if [ "$LTO" != "true" ]; then
+          if [ "$TC_MODE" = "aosp" ]; then
+            echo '# CONFIG_MODVERSIONS is not set' >> "$DEF"
             echo '# CONFIG_LTO_CLANG is not set' >> "$DEF"
           fi
-          tail -15 "$DEF"
+          tail -12 "$DEF"
 
       - name: Build kernel
         if: env.MODE == 'full'
         run: |
           set -euxo pipefail
           cd kernel
-          if [ "$LTO" = "true" ]; then
-            export PATH="$TC/bin:$PATH"
-            MKARGS="LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip"
+          if [ "$TC_MODE" = "lenovo" ]; then
+            LTC=/tmp/tc/prebuilts
+            GCCDIR="$LTC/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin"
+            CLANG="$LTC/clang/host/linux-x86/clang-r383902b1/bin/clang-11"
+            export PATH="$GCCDIR:$PATH"
+            CROSS_COMPILE=aarch64-linux-android-
+            CLANG_TRIPLE=aarch64-linux-gnu-
           else
-            MKARGS=""
+            export PATH="$AOSP_TC/bin:$PATH"
+            CLANG="$AOSP_TC/bin/clang"
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CLANG_TRIPLE=aarch64-linux-gnu-
           fi
-          make O=out ARCH=arm64 \
-            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $MKARGS \
-            "$DEFCONFIG" 2>&1 | tee /tmp/defconfig.log
-          grep -E '^CONFIG_(KSU|KSU_SUSFS|THREAD_INFO_IN_TASK|LTO|KPROBES)' out/.config | tee /tmp/config-check.txt
-          make O=out ARCH=arm64 \
-            CC="$TC/bin/clang" CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- $MKARGS \
+          "$CLANG" --version
+          make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" "$DEFCONFIG" 2>&1 | tee /tmp/defconfig.log
+          grep -E '^CONFIG_(KSU|KSU_SUSFS|THREAD_INFO_IN_TASK|LTO|MODVERSIONS)' out/.config | tee /tmp/config-check.txt
+          make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
             KCFLAGS="-Wno-unknown-attributes" \
             -j"$(nproc)" Image.gz 2>&1 | tee /tmp/build.log
 
@@ -255,9 +238,7 @@ jobs:
           TITLE="TB128FU ${VARIANT} kernel #${GITHUB_RUN_NUMBER}"
           {
             echo "Kernel: $(cat kernel/out/include/config/kernel.release 2>/dev/null || echo unknown)"
-            echo "Variant: ${VARIANT}  |  BakaSU: ${KSU_REF}  |  Kernel commit: ${KERNEL_COMMIT}"
-            echo ""
-            echo "刷入方式：recovery 里刷 AnyKernel3 zip，或用 fastboot 刷手动重打包的 boot.img。"
+            echo "Variant: ${VARIANT} | BakaSU: ${KSU_REF} | defconfig: ${DEFCONFIG} | toolchain: ${TC_MODE}"
             echo ""
             echo '```'
             cat /tmp/config-check.txt 2>/dev/null || true
@@ -265,18 +246,16 @@ jobs:
           } > /tmp/notes.md
           gh release create "$TAG" dist/*.zip dist/Image.gz dist/config.txt dist/SHA256SUMS.txt \
             --title "$TITLE" --notes-file /tmp/notes.md --repo "$GITHUB_REPOSITORY"
-          echo "### 产物地址" >> "$GITHUB_STEP_SUMMARY"
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Keep only the latest 3 releases
+      - name: Keep only the latest 3 build releases
         if: env.MODE == 'full'
         continue-on-error: true
         run: |
           set -euxo pipefail
           gh release list --limit 100 --repo "$GITHUB_REPOSITORY" --json tagName,createdAt \
-            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName' | while read -r tag; do
+            --jq '[.[] | select(.tagName|startswith("build-"))] | sort_by(.createdAt) | reverse | .[3:] | .[].tagName' | while read -r tag; do
               [ -n "$tag" ] || continue
-              echo "deleting old release: $tag"
               gh release delete "$tag" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
             done
 
@@ -286,6 +265,6 @@ jobs:
           {
             echo "### 构建失败"
             echo '```'
-            tail -80 /tmp/build.log 2>/dev/null || tail -40 /tmp/susfs-patch.log 2>/dev/null || true
+            tail -80 /tmp/build.log 2>/dev/null || tail -40 /tmp/defconfig.log 2>/dev/null || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
