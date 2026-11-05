@@ -56,6 +56,10 @@ on:
         description: "额外编译 techpack/wlan 外部模块（true/false）"
         default: "false"
         required: false
+      wlan_intree:
+        description: "把 techpack/wlan 作为内置驱动编译进内核（true/false）"
+        default: "false"
+        required: false
 
 permissions:
   contents: write
@@ -82,6 +86,7 @@ jobs:
       FORCE_MODULES: ${{ github.event.inputs.force_modules || 'false' }}
       EXTRA_DEFCONFIG: ${{ github.event.inputs.extra_defconfig || '' }}
       EXT_MODULES: ${{ github.event.inputs.ext_modules || 'false' }}
+      WLAN_INTREE: ${{ github.event.inputs.wlan_intree || 'false' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -249,6 +254,22 @@ jobs:
             done
           fi
           tail -12 "$DEF"
+
+      - name: Prepare in-tree WLAN driver
+        if: env.WLAN_INTREE == 'true'
+        run: |
+          set -euxo pipefail
+          cd kernel
+          if [ -d techpack/wlan/qcacld-3.0 ]; then
+            if [ -f techpack/wlan/qcacld-3.0/Makefile ]; then
+              mv techpack/wlan/qcacld-3.0/Makefile techpack/wlan/qcacld-3.0/Makefile.standalone
+            fi
+            ls techpack/wlan/qcacld-3.0 | head -10
+            grep -n "QCA_CLD_WLAN" techpack/wlan/config/bengalwlan.conf || true
+          else
+            echo "techpack/wlan/qcacld-3.0 not found" >&2
+            exit 1
+          fi
 
       - name: Build kernel
         if: env.MODE == 'full'
