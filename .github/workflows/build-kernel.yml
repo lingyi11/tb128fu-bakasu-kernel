@@ -95,6 +95,15 @@ jobs:
             https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git "$AOSP_TC"
           "$AOSP_TC/bin/clang" --version
 
+      - name: Fetch Android NDK r21 clang 10.0.7 (ndk10 mode only)
+        if: env.TC_MODE == 'ndk10'
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3 -o /tmp/ndk.zip https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+          mkdir -p /tmp/ndk
+          unzip -q /tmp/ndk.zip -d /tmp/ndk
+          /tmp/ndk/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version
+
       - name: Prepare kernel source
         run: |
           set -euxo pipefail
@@ -116,7 +125,7 @@ jobs:
                 cp "/tmp/casefix/$src" "kernel/$dst"
               fi
             done < /tmp/casefix/map.txt
-            if [ "$TC_MODE" = "lenovo" ]; then
+            if [ "$TC_MODE" = "lenovo" ] || [ "$TC_MODE" = "ndk10" ]; then
               echo "downloading Lenovo toolchain asset"
               mkdir -p /tmp/tc
               gh release download "$SOURCE_TAG" -p lenovo_tc.tar.gz -O /tmp/tc.tgz --repo "$GITHUB_REPOSITORY" --clobber
@@ -222,6 +231,13 @@ jobs:
             LTC=/tmp/tc/prebuilts
             GCCDIR="$LTC/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin"
             CLANG="$LTC/clang/host/linux-x86/clang-r383902b1/bin/clang-11"
+            export PATH="$GCCDIR:$PATH"
+            CROSS_COMPILE=aarch64-linux-android-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+          elif [ "$TC_MODE" = "ndk10" ]; then
+            LTC=/tmp/tc/prebuilts
+            GCCDIR="$LTC/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin"
+            CLANG=/tmp/ndk/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
             export PATH="$GCCDIR:$PATH"
             CROSS_COMPILE=aarch64-linux-android-
             CLANG_TRIPLE=aarch64-linux-gnu-
