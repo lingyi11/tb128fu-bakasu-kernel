@@ -44,6 +44,10 @@ on:
         description: "用原厂 .config 构建（release 里的文件名，空 = 用 defconfig）"
         default: ""
         required: false
+      force_modules:
+        description: "忽略 vendor 模块的 vermagic/CRC 校验（true/false）"
+        default: "false"
+        required: false
 
 permissions:
   contents: write
@@ -67,6 +71,7 @@ jobs:
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'P89990GA1_defconfig' }}
       CONFIG_ASSET: ${{ github.event.inputs.config_asset || '' }}
+      FORCE_MODULES: ${{ github.event.inputs.force_modules || 'false' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -163,6 +168,14 @@ jobs:
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
           grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
+
+      - name: Relax module checks (vendor .ko compatibility)
+        if: env.FORCE_MODULES == 'true'
+        run: |
+          set -euxo pipefail
+          cd kernel
+          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/module_force_load.patch" 2>&1 | tee /tmp/module-patch.log
+          grep -n "allow modules built with a different toolchain" kernel/module.c
 
       - name: Configure defconfig
         run: |
