@@ -110,6 +110,8 @@ jobs:
               mkdir -p /tmp/tc
               gh release download "$SOURCE_TAG" -p lenovo_tc.tar.gz -O /tmp/tc.tgz --repo "$GITHUB_REPOSITORY" --clobber
               tar -xzf /tmp/tc.tgz -C /tmp/tc
+              chmod -R +x /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin || true
+              chmod -R +x /tmp/tc/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin || true
               ls -la /tmp/tc/prebuilts/clang/host/linux-x86/clang-r383902b1/bin/clang-11
               ls -la /tmp/tc/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-ld
             fi
