@@ -104,6 +104,19 @@ jobs:
           unzip -q /tmp/ndk.zip -d /tmp/ndk
           /tmp/ndk/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/clang --version
 
+      - name: Fetch AOSP clang r370808 = 10.0.7 (clang10 mode only)
+        if: env.TC_MODE == 'clang10'
+        run: |
+          set -euxo pipefail
+          rm -rf /tmp/clangrepo
+          git clone --filter=blob:none --no-checkout --depth 1 -b android-11.0.0_r1 \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 /tmp/clangrepo
+          cd /tmp/clangrepo
+          git sparse-checkout init --cone
+          git sparse-checkout set clang-r370808
+          git checkout
+          /tmp/clangrepo/clang-r370808/bin/clang --version
+
       - name: Prepare kernel source
         run: |
           set -euxo pipefail
@@ -125,7 +138,7 @@ jobs:
                 cp "/tmp/casefix/$src" "kernel/$dst"
               fi
             done < /tmp/casefix/map.txt
-            if [ "$TC_MODE" = "lenovo" ] || [ "$TC_MODE" = "ndk10" ]; then
+            if [ "$TC_MODE" = "lenovo" ] || [ "$TC_MODE" = "ndk10" ] || [ "$TC_MODE" = "clang10" ]; then
               echo "downloading Lenovo toolchain asset"
               mkdir -p /tmp/tc
               gh release download "$SOURCE_TAG" -p lenovo_tc.tar.gz -O /tmp/tc.tgz --repo "$GITHUB_REPOSITORY" --clobber
@@ -238,6 +251,13 @@ jobs:
             LTC=/tmp/tc/prebuilts
             GCCDIR="$LTC/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin"
             CLANG=/tmp/ndk/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
+            export PATH="$GCCDIR:$PATH"
+            CROSS_COMPILE=aarch64-linux-android-
+            CLANG_TRIPLE=aarch64-linux-gnu-
+          elif [ "$TC_MODE" = "clang10" ]; then
+            LTC=/tmp/tc/prebuilts
+            GCCDIR="$LTC/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin"
+            CLANG=/tmp/clangrepo/clang-r370808/bin/clang
             export PATH="$GCCDIR:$PATH"
             CROSS_COMPILE=aarch64-linux-android-
             CLANG_TRIPLE=aarch64-linux-gnu-
