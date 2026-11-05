@@ -48,6 +48,10 @@ on:
         description: "忽略 vendor 模块的 vermagic/CRC 校验（true/false）"
         default: "false"
         required: false
+      extra_defconfig:
+        description: "额外追加到配置文件的 CONFIG 行（空格分隔）"
+        default: ""
+        required: false
 
 permissions:
   contents: write
@@ -72,6 +76,7 @@ jobs:
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'P89990GA1_defconfig' }}
       CONFIG_ASSET: ${{ github.event.inputs.config_asset || '' }}
       FORCE_MODULES: ${{ github.event.inputs.force_modules || 'false' }}
+      EXTRA_DEFCONFIG: ${{ github.event.inputs.extra_defconfig || '' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -233,6 +238,11 @@ jobs:
           fi
           # 与官方内核的 release 字符串保持一致，否则 vendor 里的 .ko 会因 vermagic 不符而加载失败
           echo 'CONFIG_LOCALVERSION="-perf+"' >> "$DEF"
+          if [ -n "${EXTRA_DEFCONFIG:-}" ]; then
+            for kv in $EXTRA_DEFCONFIG; do
+              echo "$kv" >> "$DEF"
+            done
+          fi
           tail -12 "$DEF"
 
       - name: Build kernel
