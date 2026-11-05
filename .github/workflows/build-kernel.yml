@@ -60,6 +60,10 @@ on:
         description: "把 techpack/wlan 作为内置驱动编译进内核（true/false）"
         default: "false"
         required: false
+      kernel_subdir:
+        description: "克隆仓库后内核所在的子目录（如 kernel-4.19.157）"
+        default: ""
+        required: false
 
 permissions:
   contents: write
@@ -87,6 +91,7 @@ jobs:
       EXTRA_DEFCONFIG: ${{ github.event.inputs.extra_defconfig || '' }}
       EXT_MODULES: ${{ github.event.inputs.ext_modules || 'false' }}
       WLAN_INTREE: ${{ github.event.inputs.wlan_intree || 'false' }}
+      KERNEL_SUBDIR: ${{ github.event.inputs.kernel_subdir || '' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -136,6 +141,9 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p /tmp/src
+          SOURCE_TAG="${SOURCE_TAG:-}"
+          if [ "$SOURCE_TAG" = "none" ]; then SOURCE_TAG=""; fi
+          echo "SOURCE_TAG=$SOURCE_TAG"
           if [ -n "${SOURCE_TAG:-}" ]; then
             echo "using official source asset ${SOURCE_TAG}/${SOURCE_ASSET}"
             gh release download "$SOURCE_TAG" -p "$SOURCE_ASSET" -O /tmp/ksrc.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
@@ -165,6 +173,11 @@ jobs:
             fi
           else
             git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
+            if [ -n "${KERNEL_SUBDIR:-}" ] && [ -d "kernel/$KERNEL_SUBDIR" ]; then
+              mv "kernel/$KERNEL_SUBDIR" /tmp/ksub
+              rm -rf kernel
+              mv /tmp/ksub kernel
+            fi
           fi
           cd kernel
           head -5 Makefile
