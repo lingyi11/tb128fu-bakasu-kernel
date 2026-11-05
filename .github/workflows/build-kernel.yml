@@ -40,6 +40,10 @@ on:
         description: "aosp = AOSP clang 12 + LLD；lenovo = 源码包自带 clang-r383902b1 + gcc4.9 binutils"
         default: "lenovo"
         required: false
+      config_asset:
+        description: "用原厂 .config 构建（release 里的文件名，空 = 用 defconfig）"
+        default: ""
+        required: false
 
 permissions:
   contents: write
@@ -62,6 +66,7 @@ jobs:
       KERNEL_REPO: ${{ github.event.inputs.kernel_repo || 'https://github.com/Roynas-Android-Playground/kernel_lenovo_tb128fu.git' }}
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'master' }}
       DEFCONFIG: ${{ github.event.inputs.defconfig || 'P89990GA1_defconfig' }}
+      CONFIG_ASSET: ${{ github.event.inputs.config_asset || '' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -163,6 +168,12 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
+          if [ -n "${CONFIG_ASSET:-}" ]; then
+            echo "using stock kernel config ${CONFIG_ASSET}"
+            gh release download "$SOURCE_TAG" -p "$CONFIG_ASSET" -O arch/arm64/configs/stock_defconfig --repo "$GITHUB_REPOSITORY" --clobber
+            DEFCONFIG=stock_defconfig
+            echo "DEFCONFIG=stock_defconfig" >> "$GITHUB_ENV"
+          fi
           DEF=arch/arm64/configs/$DEFCONFIG
           if [ "$VARIANT" = "bakasu" ]; then
             { echo ''; echo '# BakaSU + SuSFS';
