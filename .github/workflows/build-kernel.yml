@@ -343,7 +343,7 @@ jobs:
               echo "=== building external modules in $d ==="
               make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
                 M="$d" $extra -j"$(nproc)" modules 2>&1 | tail -60 || true
-              find "$d" -name '*.ko' -print >> /tmp/ext-ko.txt || true
+              find "$d" "out/$d" -name '*.ko' -print >> /tmp/ext-ko.txt 2>/dev/null || true
             done
             sort -u /tmp/ext-ko.txt -o /tmp/ext-ko.txt || true
             echo "external ko files:"; cat /tmp/ext-ko.txt || true
