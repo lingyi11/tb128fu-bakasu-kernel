@@ -334,11 +334,15 @@ jobs:
             INSTALL_MOD_PATH="$PWD/modout" modules_install 2>&1 | tee -a /tmp/modules.log
           if [ "${EXT_MODULES:-false}" = "true" ]; then
             : > /tmp/ext-ko.txt
-            for d in ${EXT_MODULE_DIRS:-techpack/wlan techpack/audio}; do
+            for d in ${EXT_MODULE_DIRS:-techpack/wlan/qcacld-3.0}; do
               [ -d "$d" ] || continue
+              extra=""
+              case "$d" in
+                *qcacld*) extra="MODNAME=wlan CONFIG_QCA_CLD_WLAN=m WLAN_ROOT=$PWD/$d" ;;
+              esac
               echo "=== building external modules in $d ==="
               make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
-                M="$d" WLAN_ROOT="$PWD/$d" -j"$(nproc)" modules 2>&1 | tail -40 || true
+                M="$d" $extra -j"$(nproc)" modules 2>&1 | tail -60 || true
               find "$d" -name '*.ko' -print >> /tmp/ext-ko.txt || true
             done
             sort -u /tmp/ext-ko.txt -o /tmp/ext-ko.txt || true
