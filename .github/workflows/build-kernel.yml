@@ -250,8 +250,12 @@ jobs:
           cp "$GITHUB_WORKSPACE/susfs/fs/sus_su.c" kernel/fs/sus_su.c
           cp "$GITHUB_WORKSPACE/susfs/include/linux/"*.h kernel/include/linux/
           cd kernel
+          # 4.19 lacks inotify_mark_user_mask(); keep the original fdinfo.c so the
+          # SUS_MOUNT fdinfo hunks do not break the build.
+          cp fs/notify/fdinfo.c /tmp/fdinfo.c.orig
           patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/susfs/50_add_susfs_in_kernel-4.19.patch" 2>&1 | tee /tmp/susfs-patch.log || true
           python3 "$GITHUB_WORKSPACE/susfs/sched_h_fix.py"
+          cp /tmp/fdinfo.c.orig fs/notify/fdinfo.c
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
 
