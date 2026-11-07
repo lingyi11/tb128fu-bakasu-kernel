@@ -95,6 +95,18 @@ def patch_fdinfo():
         sys.exit("fdinfo.c: exportfs include not found")
     src = src.replace(anchor, anchor + SUSFS_HDR, 1)
 
+    # 1b. the upstream patch declares these two helpers locally in fdinfo.c
+    guard = "#if defined(CONFIG_INOTIFY_USER) || defined(CONFIG_FANOTIFY)\n\n"
+    if guard not in src:
+        sys.exit("fdinfo.c: inotify/fanotify guard not found")
+    decls = (
+        "#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\n"
+        "extern bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);\n"
+        "extern void susfs_sus_kstat_spoof_inotify_fdinfo(unsigned long *out_target_ino, dev_t *out_target_dev);\n"
+        "#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\n\n"
+    )
+    src = src.replace(guard, guard + decls, 1)
+
     # 2. show_fdinfo prototype + call
     old_proto = (
         "static void show_fdinfo(struct seq_file *m, struct file *f,\n"
