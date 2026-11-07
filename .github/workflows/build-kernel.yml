@@ -287,6 +287,8 @@ jobs:
           fi
           # 与官方内核的 release 字符串保持一致，否则 vendor 里的 .ko 会因 vermagic 不符而加载失败
           echo 'CONFIG_LOCALVERSION="-perf+"' >> "$DEF"
+          # 外部模块（如 wlan.ko）无法用内核构建密钥签名，关闭强制签名校验以便加载
+          echo '# CONFIG_MODULE_SIG_FORCE is not set' >> "$DEF"
           if [ -n "${EXTRA_DEFCONFIG:-}" ]; then
             for kv in $EXTRA_DEFCONFIG; do
               echo "$kv" >> "$DEF"
