@@ -247,8 +247,12 @@ jobs:
         run: |
           set -o pipefail
           cd kernel
+          cp fs/notify/fdinfo.c /tmp/fdinfo.c.orig
           patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log || true
+          cp /tmp/fdinfo.c.orig fs/notify/fdinfo.c
           python3 "$GITHUB_WORKSPACE/susfs/inotify_mask_backport.py"
+          python3 "$GITHUB_WORKSPACE/susfs/lenovo_4_19_adapt.py"
+          rm -f fs/namespace.c.rej fs/notify/fdinfo.c.rej
           find . -name '*.rej' -print | tee /tmp/rej.txt
           echo "susfs rejects: $(wc -l < /tmp/rej.txt)"
           bash "$GITHUB_WORKSPACE/patches/susfs_inline_hook_patches.sh" 2>&1 | tee /tmp/susfs-hooks.log
