@@ -64,6 +64,10 @@ on:
         description: "要额外编译的外部模块目录（空格分隔）"
         default: "techpack/wlan techpack/audio"
         required: false
+      stub_techpack:
+        description: "编内核时把 techpack/wlan、techpack/audio 的 in-tree 入口短路（避免编进内核，只做外部模块）"
+        default: "false"
+        required: false
       kernel_subdir:
         description: "克隆仓库后内核所在的子目录（如 kernel-4.19.157）"
         default: ""
@@ -95,7 +99,8 @@ jobs:
       FORCE_MODULES: ${{ github.event.inputs.force_modules || 'false' }}
       EXTRA_DEFCONFIG: ${{ github.event.inputs.extra_defconfig || '' }}
       EXT_MODULES: ${{ github.event.inputs.ext_modules || 'false' }}
-      EXT_MODULE_DIRS: ${{ github.event.inputs.ext_module_dirs || 'techpack/wlan techpack/audio' }}
+      EXT_MODULE_DIRS: ${{ github.event.inputs.ext_module_dirs || 'techpack/wlan/qcacld-3.0' }}
+      STUB_TECHPACK: ${{ github.event.inputs.stub_techpack || 'false' }}
       WLAN_INTREE: ${{ github.event.inputs.wlan_intree || 'false' }}
       KERNEL_SUBDIR: ${{ github.event.inputs.kernel_subdir || '' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
@@ -176,6 +181,15 @@ jobs:
             fi
             # 去掉 git 元数据，避免 setlocalversion 追加额外的 "+"，保证版本串与官方一致
             rm -rf kernel/.git
+          fi
+          if [ "${STUB_TECHPACK:-false}" = "true" ]; then
+            for d in techpack/wlan techpack/audio; do
+              if [ -f "kernel/$d/Makefile" ] && [ ! -f "kernel/$d/Makefile.stubbed" ]; then
+                mv "kernel/$d/Makefile" "kernel/$d/Makefile.stubbed"
+                printf 'obj-y :=\n' > "kernel/$d/Makefile"
+                echo "stubbed in-tree build for $d"
+              fi
+            done
           fi
           if [ "$TC_MODE" = "lenovo" ] || [ "$TC_MODE" = "ndk10" ] || [ "$TC_MODE" = "clang10" ]; then
             echo "downloading Lenovo toolchain asset"
@@ -334,6 +348,13 @@ jobs:
           rm -rf modout
           make O=out ARCH=arm64 CC="$CLANG" CLANG_TRIPLE="$CLANG_TRIPLE" CROSS_COMPILE="$CROSS_COMPILE" \
             INSTALL_MOD_PATH="$PWD/modout" modules_install 2>&1 | tee -a /tmp/modules.log
+          if [ "${STUB_TECHPACK:-false}" = "true" ]; then
+            for d in techpack/wlan techpack/audio; do
+              if [ -f "$d/Makefile.stubbed" ]; then
+                mv "$d/Makefile.stubbed" "$d/Makefile"
+              fi
+            done
+          fi
           if [ "${EXT_MODULES:-false}" = "true" ]; then
             : > /tmp/ext-ko.txt
             for d in ${EXT_MODULE_DIRS:-techpack/wlan/qcacld-3.0}; do
