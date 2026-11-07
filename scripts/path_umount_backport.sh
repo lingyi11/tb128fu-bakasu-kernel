@@ -68,8 +68,8 @@ int path_umount(struct path *path, int flags)
 
 EOF
 
-LINENO=$(grep -n "$ANCHOR" "$NS" | head -n1 | cut -d: -f1)
-START=$LINENO
+ANCHOR_LINE=$(grep -n "$ANCHOR" "$NS" | head -n1 | cut -d: -f1)
+START=$ANCHOR_LINE
 while [ "$START" -gt 1 ] && ! sed -n "${START}p" "$NS" | grep -q '/\*'; do
     START=$((START - 1))
 done
