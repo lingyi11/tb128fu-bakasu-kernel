@@ -224,7 +224,7 @@ jobs:
         run: |
           set -o pipefail
           cd kernel
-          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log
+          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
 
