@@ -6,9 +6,8 @@ patch was written against:
 
   fs/notify/fdinfo.c  - our tree keeps `u32 mask = mark->mask & IN_ALL_EVENTS;`
                         and prints ignored_mask, so hunk #4 does not apply.
-                        We rebuild the whole SUS_KSTAT / SUS_MOUNT support here
-                        from the ORIGINAL file (the fuzz-applied result is
-                        discarded by the build script before this runs).
+                        The build script restores the original file and this
+                        script rebuilds the SUS_KSTAT / SUS_MOUNT support.
 
   fs/namespace.c      - 4.19 has no fs_context / vfs_create_mount(); the
                         equivalent allocation lives in vfs_kern_mount().
@@ -20,7 +19,8 @@ import sys
 FDINFO = "fs/notify/fdinfo.c"
 NS = "fs/namespace.c"
 
-SKIP_HDR = """#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+# susfs.h is needed by both SUS_KSTAT and SUS_MOUNT code paths.
+SUSFS_HDR = """#ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs.h>
 #include <linux/susfs_def.h>
 #endif
@@ -90,10 +90,10 @@ def patch_fdinfo():
         return
 
     # 1. includes
-    anchor = '#include <linux/exportfs.h>\n'
+    anchor = "#include <linux/exportfs.h>\n"
     if anchor not in src:
         sys.exit("fdinfo.c: exportfs include not found")
-    src = src.replace(anchor, anchor + SKIP_HDR, 1)
+    src = src.replace(anchor, anchor + SUSFS_HDR, 1)
 
     # 2. show_fdinfo prototype + call
     old_proto = (
@@ -140,7 +140,29 @@ def patch_fdinfo():
         sys.exit("fdinfo.c: inotify_fdinfo signature not found")
     src = src.replace(old_sig, new_sig, 1)
 
-    # 4. insert hiding block right after "if (inode) {"
+    # 4a. hoist `u32 mask` to the top of inotify_fdinfo (gnu89: no declaration
+    #     after a label; orig_flow: is followed by the original declaration).
+    top_anchor = (
+        "\tstruct inode *inode;\n"
+        "\n"
+        "\tif (mark->connector->type != FSNOTIFY_OBJ_TYPE_INODE)\n"
+    )
+    top_new = (
+        "\tstruct inode *inode;\n"
+        "\tu32 mask;\n"
+        "\n"
+        "\tif (mark->connector->type != FSNOTIFY_OBJ_TYPE_INODE)\n"
+    )
+    if top_anchor not in src:
+        sys.exit("fdinfo.c: inotify_fdinfo top anchor not found")
+    src = src.replace(top_anchor, top_new, 1)
+
+    if "\t\tu32 mask = mark->mask & IN_ALL_EVENTS;\n" not in src:
+        sys.exit("fdinfo.c: mask declaration not found")
+    src = src.replace("\t\tu32 mask = mark->mask & IN_ALL_EVENTS;\n",
+                      "\t\tmask = mark->mask & IN_ALL_EVENTS;\n", 1)
+
+    # 4b. insert hiding block right after "if (inode) {"
     anchor2 = (
         "\tinode_mark = container_of(mark, struct inotify_inode_mark, fsn_mark);\n"
         "\tinode = igrab(fsnotify_conn_inode(mark->connector));\n"
@@ -198,16 +220,14 @@ def patch_ns():
         print("namespace.c already adapted")
         return
 
-    # 1. includes + externs
-    if "susfs_is_sdcard_android_data_not_decrypted" not in src.split("vfs_kern_mount")[0]:
+    if "#include <linux/susfs_def.h>" not in src:
         anchor = '#include "internal.h"\n'
         if anchor not in src:
             sys.exit("namespace.c: internal.h include not found")
         src = src.replace(anchor, anchor + NS_HDR, 1)
 
-    # 2. vfs_kern_mount allocation
-    old_alloc = "\tmnt = alloc_vfsmnt(name);\n"
     if "susfs_alloc_non_unshare_ksu_vfsmnt(name)" not in src:
+        old_alloc = "\tmnt = alloc_vfsmnt(name);\n"
         if old_alloc not in src:
             sys.exit("namespace.c: alloc_vfsmnt(name) not found")
         src = src.replace(old_alloc, NS_ALLOC, 1)
