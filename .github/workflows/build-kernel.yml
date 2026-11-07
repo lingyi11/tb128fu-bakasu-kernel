@@ -233,7 +233,7 @@ jobs:
           grep -n 'path_umount' fs/namespace.c | head -5
 
       - name: Apply BakaSU manual hooks
-        if: startsWith(env.VARIANT, 'bakasu')
+        if: env.VARIANT == 'bakasu-nosusfs'
         run: |
           set -o pipefail
           cd kernel
@@ -242,22 +242,17 @@ jobs:
           test ! -s /tmp/rej.txt
           grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
 
-      - name: Apply SuSFS (kernel side, susfs4ksu 4.19)
+      - name: Apply SuSFS v2.3.0 (kernel side + inline hooks)
         if: env.VARIANT == 'bakasu'
         run: |
           set -o pipefail
-          cp "$GITHUB_WORKSPACE/susfs/fs/susfs.c" kernel/fs/susfs.c
-          cp "$GITHUB_WORKSPACE/susfs/fs/sus_su.c" kernel/fs/sus_su.c
-          cp "$GITHUB_WORKSPACE/susfs/include/linux/"*.h kernel/include/linux/
           cd kernel
-          # 4.19 lacks inotify_mark_user_mask(); keep the original fdinfo.c so the
-          # SUS_MOUNT fdinfo hunks do not break the build.
-          cp fs/notify/fdinfo.c /tmp/fdinfo.c.orig
-          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/susfs/50_add_susfs_in_kernel-4.19.patch" 2>&1 | tee /tmp/susfs-patch.log || true
-          python3 "$GITHUB_WORKSPACE/susfs/sched_h_fix.py"
-          cp /tmp/fdinfo.c.orig fs/notify/fdinfo.c
+          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log || true
+          python3 "$GITHUB_WORKSPACE/susfs/inotify_mask_backport.py"
           find . -name '*.rej' -print | tee /tmp/rej.txt
-          test ! -s /tmp/rej.txt
+          echo "susfs rejects: $(wc -l < /tmp/rej.txt)"
+          bash "$GITHUB_WORKSPACE/patches/susfs_inline_hook_patches.sh" 2>&1 | tee /tmp/susfs-hooks.log
+          grep -c "ksu_handle_setresuid" kernel/sys.c
 
       - name: Hide KernelSU traces (hide_stuff)
         if: env.HIDE_STUFF == 'true'
