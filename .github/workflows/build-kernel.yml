@@ -72,6 +72,10 @@ on:
         description: "打补丁允许 adb shell 读取内核日志（true/false）"
         default: "false"
         required: false
+      hide_stuff:
+        description: "打 hide_stuff 补丁清理 KernelSU 痕迹（true/false）"
+        default: "false"
+        required: false
       kernel_subdir:
         description: "克隆仓库后内核所在的子目录（如 kernel-4.19.157）"
         default: ""
@@ -106,6 +110,7 @@ jobs:
       EXT_MODULE_DIRS: ${{ github.event.inputs.ext_module_dirs || 'techpack/wlan/qcacld-3.0' }}
       STUB_TECHPACK: ${{ github.event.inputs.stub_techpack || 'false' }}
       DEBUG_SYSLOG: ${{ github.event.inputs.debug_syslog || 'false' }}
+      HIDE_STUFF: ${{ github.event.inputs.hide_stuff || 'false' }}
       WLAN_INTREE: ${{ github.event.inputs.wlan_intree || 'false' }}
       KERNEL_SUBDIR: ${{ github.event.inputs.kernel_subdir || '' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
@@ -227,6 +232,16 @@ jobs:
           bash "$GITHUB_WORKSPACE/scripts/path_umount_backport.sh" .
           grep -n 'path_umount' fs/namespace.c | head -5
 
+      - name: Apply BakaSU manual hooks
+        if: startsWith(env.VARIANT, 'bakasu')
+        run: |
+          set -o pipefail
+          cd kernel
+          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/ksu_manual_hooks_4.19_grass.patch" 2>&1 | tee /tmp/manual-hooks.log
+          find . -name '*.rej' -print | tee /tmp/rej.txt
+          test ! -s /tmp/rej.txt
+          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
+
       - name: Apply SuSFS (kernel side, susfs4ksu 4.19)
         if: env.VARIANT == 'bakasu'
         run: |
@@ -240,25 +255,16 @@ jobs:
           find . -name '*.rej' -print | tee /tmp/rej.txt
           test ! -s /tmp/rej.txt
 
-      - name: Apply BakaSU manual hooks (SuSFS build)
-        if: env.VARIANT == 'bakasu'
+      - name: Hide KernelSU traces (hide_stuff)
+        if: env.HIDE_STUFF == 'true'
         run: |
           set -o pipefail
+          git clone -q --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git /tmp/SukiSU_patch
+          ls /tmp/SukiSU_patch/69_hide_stuff.patch
           cd kernel
-          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/ksu_manual_hooks_4.19_grass.patch" 2>&1 | tee /tmp/manual-hooks.log
-          find . -name '*.rej' -print | tee /tmp/rej2.txt
-          test ! -s /tmp/rej2.txt
-          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
-
-      - name: Apply BakaSU manual hooks (no SuSFS)
-        if: env.VARIANT == 'bakasu-nosusfs'
-        run: |
-          set -o pipefail
-          cd kernel
-          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/ksu_manual_hooks_4.19_grass.patch" 2>&1 | tee /tmp/manual-hooks.log
-          find . -name '*.rej' -print | tee /tmp/rej.txt
-          test ! -s /tmp/rej.txt
-          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
+          patch -p1 -F3 --no-backup-if-mismatch --forward < /tmp/SukiSU_patch/69_hide_stuff.patch 2>&1 | tee /tmp/hide-stuff.log || true
+          find . -name '*.rej' -print | tee /tmp/hide-rej.txt
+          echo "hide_stuff rejects: $(wc -l < /tmp/hide-rej.txt)"
 
       - name: Relax module checks (vendor .ko compatibility)
         if: env.FORCE_MODULES == 'true'
