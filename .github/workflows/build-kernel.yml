@@ -219,21 +219,27 @@ jobs:
           ls -la drivers/kernelsu | head -20
           git -C KernelSU describe --tags --always || true
 
-      - name: Apply SuSFS kernel patch
+      - name: Apply SuSFS (kernel side, susfs4ksu 4.19)
         if: env.VARIANT == 'bakasu'
         run: |
           set -o pipefail
+          cp "$GITHUB_WORKSPACE/susfs/fs/susfs.c" kernel/fs/susfs.c
+          cp "$GITHUB_WORKSPACE/susfs/fs/sus_su.c" kernel/fs/sus_su.c
+          cp "$GITHUB_WORKSPACE/susfs/include/linux/"*.h kernel/include/linux/
           cd kernel
-          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/susfs_v2.3.0_4.19_grass.patch" 2>&1 | tee /tmp/susfs-patch.log
+          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/susfs/50_add_susfs_in_kernel-4.19.patch" 2>&1 | tee /tmp/susfs-patch.log || true
           find . -name '*.rej' -print | tee /tmp/rej.txt
-          test ! -s /tmp/rej.txt
+          grep -c "susfs" fs/namespace.c fs/open.c fs/stat.c fs/exec.c fs/readdir.c 2>/dev/null || true
 
-      - name: Apply SuSFS inline hooks
+      - name: Apply BakaSU manual hooks (SuSFS build)
         if: env.VARIANT == 'bakasu'
         run: |
           set -o pipefail
           cd kernel
-          bash "$GITHUB_WORKSPACE/patches/susfs_inline_hook_patches.sh" 2>&1 | tee /tmp/susfs-hooks.log
+          patch -p1 -F3 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/ksu_manual_hooks_4.19_grass.patch" 2>&1 | tee /tmp/manual-hooks.log
+          find . -name '*.rej' -print | tee /tmp/rej2.txt
+          test ! -s /tmp/rej2.txt
+          grep -c "ksu_handle" fs/stat.c fs/open.c fs/exec.c kernel/reboot.c
 
       - name: Apply BakaSU manual hooks (no SuSFS)
         if: env.VARIANT == 'bakasu-nosusfs'
@@ -266,7 +272,11 @@ jobs:
           DEF=arch/arm64/configs/$DEFCONFIG
           if [ "$VARIANT" = "bakasu" ]; then
             { echo ''; echo '# BakaSU + SuSFS';
-              echo 'CONFIG_KSU=y'; echo 'CONFIG_KSU_SUSFS=y'; echo 'CONFIG_THREAD_INFO_IN_TASK=y';
+              echo 'CONFIG_KSU=y'; echo 'CONFIG_KSU_MANUAL_HOOK=y'; echo 'CONFIG_KSU_SUSFS=y';
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y';
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y';
+              echo 'CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y';
+              echo 'CONFIG_THREAD_INFO_IN_TASK=y';
               echo 'CONFIG_KSU_SUSFS_SUS_PATH=y'; echo 'CONFIG_KSU_SUSFS_SUS_MOUNT=y';
               echo 'CONFIG_KSU_SUSFS_SUS_KSTAT=y'; echo 'CONFIG_KSU_SUSFS_SPOOF_UNAME=y';
               echo 'CONFIG_KSU_SUSFS_ENABLE_LOG=y'; echo 'CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y';
