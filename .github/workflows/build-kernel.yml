@@ -68,6 +68,10 @@ on:
         description: "编内核时把 techpack/wlan、techpack/audio 的 in-tree 入口短路（避免编进内核，只做外部模块）"
         default: "false"
         required: false
+      debug_syslog:
+        description: "打补丁允许 adb shell 读取内核日志（true/false）"
+        default: "false"
+        required: false
       kernel_subdir:
         description: "克隆仓库后内核所在的子目录（如 kernel-4.19.157）"
         default: ""
@@ -101,6 +105,7 @@ jobs:
       EXT_MODULES: ${{ github.event.inputs.ext_modules || 'false' }}
       EXT_MODULE_DIRS: ${{ github.event.inputs.ext_module_dirs || 'techpack/wlan/qcacld-3.0' }}
       STUB_TECHPACK: ${{ github.event.inputs.stub_techpack || 'false' }}
+      DEBUG_SYSLOG: ${{ github.event.inputs.debug_syslog || 'false' }}
       WLAN_INTREE: ${{ github.event.inputs.wlan_intree || 'false' }}
       KERNEL_SUBDIR: ${{ github.event.inputs.kernel_subdir || '' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'lenovo' }}
@@ -304,6 +309,14 @@ jobs:
             echo "techpack/wlan/qcacld-3.0 not found" >&2
             exit 1
           fi
+
+      - name: Debug syslog patch
+        if: env.DEBUG_SYSLOG == 'true'
+        run: |
+          set -euxo pipefail
+          cd kernel
+          patch -p1 --no-backup-if-mismatch --forward < "$GITHUB_WORKSPACE/patches/debug_syslog.patch" 2>&1 | tee /tmp/debug-syslog.log
+          grep -n "let adb shell read the kernel log" kernel/printk/printk.c
 
       - name: Build kernel
         if: env.MODE == 'full'

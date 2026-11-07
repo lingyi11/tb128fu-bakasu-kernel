@@ -1,0 +1,10 @@
+--- a/kernel/printk/printk.c
++++ b/kernel/printk/printk.c
+@@ -661,6 +661,7 @@
+ static int syslog_action_restricted(int type)
+ {
++	return 0; /* debug: let adb shell read the kernel log */
+ 	if (dmesg_restrict)
+ 		return 1;
+ 	/*
+ 	 * Unless restricted, we allow "read all" and "get buffer size"
